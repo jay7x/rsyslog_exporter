@@ -7,13 +7,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gopkg.in/mcuadros/go-syslog.v2"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
-	"log"
-	"net/http"
-	"net/url"
 )
 
 func syslog_server_init(syslog_format string, conn string) (*syslog.Server, syslog.LogPartsChannel, error) {
@@ -69,40 +70,29 @@ func process_syslog_messages(rs *RsyslogStats, channel syslog.LogPartsChannel) {
 	}
 }
 
-
 // Collector
 type RsyslogStatsCollector struct {
-  RS *RsyslogStats
+	RS *RsyslogStats
 }
 
 func NewRsyslogStatsCollector(rs *RsyslogStats) *RsyslogStatsCollector {
-  return &RsyslogStatsCollector{RS: rs}
+	return &RsyslogStatsCollector{RS: rs}
 }
 
 func (rsc *RsyslogStatsCollector) Describe(ch chan<- *prometheus.Desc) {
-  log.Print("Describing metrics...")
+	log.Print("Describing metrics...")
 }
 
 func (rsc *RsyslogStatsCollector) Collect(ch chan<- prometheus.Metric) {
-  log.Print("Collecting metrics...")
-  lbl_names, lbl_values := make([]string, 2)
-  for metric_name, labeled_values := range rsc.RS.Current {
-    for label, value := range labeled_values {
-      if label.Name != "" {
-        lbls = append(lbls, label.Name)
-        if label.Bucket != "" {
-          log.Printf("%s{name=\"%s\",bucket=\"%s\"} %d", metric_name, label.Name, label.Bucket, value)
-        } else {
-          log.Printf("%s{name=\"%s\"} %d", metric_name, label.Name, value)
-        }
-      } else {
-          log.Printf("%s %d", metric_name, value)
-      }
-    }
-  }
+	log.Print("Collecting metrics...")
+	for metric_name, labeled_values := range rsc.RS.Current {
+		for labels, value := range labeled_values {
+			log.Printf("%s{name=\"%s\",counter=\"%s\"} %d", metric_name, labels.Name, labels.Counter, value)
+		}
+	}
 
-  // export internal counters
-  // iterate over rs.Current to generate metrics
+	// export internal counters
+	// iterate over rs.Current to generate metrics
 }
 
 func main() {
@@ -120,16 +110,16 @@ func main() {
 	// RsyslogStats structure
 	rs := NewRsyslogStats()
 
-  // RsyslogStatsCollector
-  rsc := NewRsyslogStatsCollector(rs)
+	// RsyslogStatsCollector
+	rsc := NewRsyslogStatsCollector(rs)
 
-  // Prometheus registry
-  reg := prometheus.NewPedanticRegistry()
-  reg.MustRegister(
+	// Prometheus registry
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 		prometheus.NewGoCollector(),
 		prometheus.NewBuildInfoCollector(),
-    rsc,
+		rsc,
 	)
 
 	// Expose the registered metrics via HTTP.

@@ -10,11 +10,8 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
-)
-
-const (
-	metric_prefix = "rsyslog"
 )
 
 // Sanitise metric name
@@ -40,42 +37,47 @@ func splitRight(str string) (string, string) {
 // Metric value type
 type RsyslogStatsValue int
 
-// All possible labels of a metric value: '{"name":"msg_per_severity", "bucket":"syslog"}'
+// Labels pair: {name="main Q",counter="discarder.full"}
 type RsyslogStatsLabels struct {
-	Name, Bucket string
+	Name, Counter string
 }
 
-// Map of metric values with their labels: '{ {"name":"msg_per_severity", "bucket":"syslog"}: 123 }'
+// Map of metric values with their labels: { {name="main Q",counter="discarded.full"}: 123, ...}
 type RsyslogStatsLabeledValues map[RsyslogStatsLabels]RsyslogStatsValue
 
-// Map of metrics of values with their labels: '{ "rsyslog_dynstats_bucket_msg_per_facility": { {"name":"msg_per_severity", "bucket":"syslog"}: 123 } }'
+// Map of metrics: '{ "rsyslog_core_queue": { {"name":"main Q", "counter":"discarded.full"}: 123 }, ... }, ...'
 type RsyslogStatsMetrics map[string]RsyslogStatsLabeledValues
 
 type RsyslogStats struct {
 	Current        RsyslogStatsMetrics
 	ParserFailures int
 	StatsParsed    int
+	MetricPrefix   string
+	NameField      string
+	OriginField    string
 }
 
 func NewRsyslogStats() *RsyslogStats {
 	rs := new(RsyslogStats)
+	rs.MetricPrefix = "rsyslog"
+	rs.NameField = "name"
+	rs.OriginField = "origin"
 	rs.ParserFailures = 0
 	rs.StatsParsed = 0
 	rs.Current = make(RsyslogStatsMetrics)
 	return rs
 }
 
-// Add metric with the 'name' label and the value (which is float64 internally)
+// Add metric with labels
 func (rs *RsyslogStats) add(metric_name string, labels RsyslogStatsLabels, value interface{}) {
 	sane_metric_name := sanitiseMetricName(metric_name)
 	sane_value := RsyslogStatsValue(value.(float64))
-	sane_labels := RsyslogStatsLabels{Name: sanitiseMetricName(labels.Name), Bucket: sanitiseMetricName(labels.Bucket)}
-	log.Printf("%s[%s] = %d\n", sane_metric_name, sane_labels, sane_value)
+	log.Printf("%s[%s, %s] = %d\n", sane_metric_name, labels.Name, labels.Counter, sane_value)
 	// TODO locking?
 	if _, found := rs.Current[sane_metric_name]; !found {
 		rs.Current[sane_metric_name] = make(RsyslogStatsLabeledValues)
 	}
-	rs.Current[sane_metric_name][sane_labels] = sane_value
+	rs.Current[sane_metric_name][labels] = sane_value
 }
 
 func (rs *RsyslogStats) failToParse(err error, source string) error {
@@ -98,46 +100,72 @@ func (rs *RsyslogStats) Parse(statLine string) error {
 	}
 
 	var found bool
+
 	// sanity check for 'name' and 'origin' presence
-	if name, found = data["name"].(string); !found {
-		return rs.failToParse(fmt.Errorf("'name' key is required but not found"), statLine)
+	if name, found = data[rs.NameField].(string); !found {
+		return rs.failToParse(fmt.Errorf("'%s' field is required but not found", rs.NameField), statLine)
 	}
-	if origin, found = data["origin"].(string); !found {
-		if name == "omkafka" {
+
+	if origin, found = data[rs.OriginField].(string); !found {
+		switch name {
+		case "omkafka": // omkafka missing origin hack (issue #1508, pre-8.27)
 			origin = "omkafka"
-		} else {
-			return rs.failToParse(fmt.Errorf("'origin' key is required but not found"), statLine)
+		case "_sender_stat": // senders.keepTrack stats hack - https://github.com/rsyslog/rsyslog/pull/4601
+			origin = "_sender_stat"
+		default:
+			return rs.failToParse(fmt.Errorf("'%s' field is required but not found", rs.OriginField), statLine)
 		}
 	}
 
-	metric_basename = metric_prefix + "_" + origin
+	// senders.keepTrack stats hack - rewrite origin & name
+	if name == "_sender_stat" {
+		origin = "_sender_stat"
+		name = data["sender"].(string)
+	}
 
-	switch origin {
-	case "dynstats":
-		// Special case for dynamic stats fields reported in <name>.<field> format
-		for k, v := range data["values"].(map[string]interface{}) {
-			dn, dc := splitRight(k)
-			metric_name := metric_basename + "_global_" + dc
-			rs.add(metric_name, RsyslogStatsLabels{dn, ""}, v)
+	metric_basename = rs.MetricPrefix + "_" + origin
+
+	skip_fields := map[string]bool{
+		rs.OriginField: true,
+		rs.NameField:   true,
+	}
+
+	if values, found := data["values"].(map[string]interface{}); found {
+		if origin == "dynstats" {
+			// Special case for dynstats fields reported in <name>.<field> format
+			for field, value := range values {
+				name, counter := splitRight(field)
+				rs.add(metric_basename, RsyslogStatsLabels{name, counter}, value)
+			}
+		} else {
+			// case for dynstats.bucket and any other possible "values"
+			for counter, value := range values {
+				rs.add(metric_basename, RsyslogStatsLabels{name, counter}, value)
+			}
 		}
-	case "dynstats.bucket":
-		metric_name := metric_basename
-		for k, v := range data["values"].(map[string]interface{}) {
-			rs.add(metric_name, RsyslogStatsLabels{name, k}, v)
-		}
-	default:
-		for k, v := range data {
-			// skip 'name' and 'origin' fields
-			if (k == "name") || (k == "origin") {
+	} else {
+		for counter, value := range data {
+			// skip some fields (origin & name e.g.)
+			if _, found := skip_fields[counter]; found {
 				continue
 			}
 
-			switch v.(type) {
+			// senders.keepTrack stats hack - skip "sender" field just in this message
+			if origin == "senders" && counter == "sender" {
+				continue
+			}
+
+			switch value.(type) {
 			case float64:
-				metric_name := metric_basename + "_" + k
-				rs.add(metric_name, RsyslogStatsLabels{name, ""}, v)
+				rs.add(metric_basename, RsyslogStatsLabels{name, counter}, value)
+			case string:
+				if v, err := strconv.ParseFloat(value.(string), 64); err != nil {
+					rs.failToParse(fmt.Errorf("Cannot convert field '%s' to float: %w!", counter, err), statLine)
+				} else {
+					rs.add(metric_basename, RsyslogStatsLabels{name, counter}, v)
+				}
 			default:
-				rs.failToParse(fmt.Errorf("Wrong value type '%T' for metric '%s'. Must be a number", v, k), statLine)
+				rs.failToParse(fmt.Errorf("Wrong value type '%T' for the field '%s'!", value, counter), statLine)
 			}
 		}
 	}
