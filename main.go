@@ -1,5 +1,20 @@
 /*
- * bla bla bla
+ * Export rsyslog counters as prometheus metrics
+ *
+ * Copyright (c) 2021, Yury Bushmelev <jay4mail@gmail.com>
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package main
@@ -11,27 +26,29 @@ import (
 	"net/http"
 	"net/url"
 
+	_ "net/http/pprof"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gopkg.in/mcuadros/go-syslog.v2"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
 )
 
-func syslog_server_init(syslog_format string, conn string) (*syslog.Server, syslog.LogPartsChannel, error) {
+// Init syslog server
+func syslogServerInit(syslogFormat string, conn string) (*syslog.Server, syslog.LogPartsChannel, error) {
 	channel := make(syslog.LogPartsChannel)
 	handler := syslog.NewChannelHandler(channel)
-
 	server := syslog.NewServer()
 
 	var format format.Format
 
-	switch syslog_format {
+	switch syslogFormat {
 	case "rfc3164":
 		format = syslog.RFC3164
 	case "rfc5424":
 		format = syslog.RFC5424
 	default:
-		return nil, nil, fmt.Errorf("Format %s is not supported!", syslog_format)
+		return nil, nil, fmt.Errorf("format %s is not supported", syslogFormat)
 	}
 
 	server.SetFormat(format)
@@ -61,12 +78,9 @@ func syslog_server_init(syslog_format string, conn string) (*syslog.Server, sysl
 	return server, channel, nil
 }
 
-func process_syslog_messages(rs *RsyslogStats, channel syslog.LogPartsChannel) {
+func processSyslogMessages(rs *RsyslogStats, channel syslog.LogPartsChannel) {
 	for line := range channel {
-		err := rs.Parse(line["content"].(string))
-		if err != nil {
-			//log.Println(err)
-		}
+		rs.Parse(line["content"].(string))
 	}
 }
 
@@ -80,29 +94,68 @@ func NewRsyslogStatsCollector(rs *RsyslogStats) *RsyslogStatsCollector {
 }
 
 func (rsc *RsyslogStatsCollector) Describe(ch chan<- *prometheus.Desc) {
-	log.Print("Describing metrics...")
+	log.Print("-- Describing metrics...")
 }
 
 func (rsc *RsyslogStatsCollector) Collect(ch chan<- prometheus.Metric) {
-	log.Print("Collecting metrics...")
-	for metric_name, labeled_values := range rsc.RS.Current {
-		for labels, value := range labeled_values {
-			log.Printf("%s{name=\"%s\",counter=\"%s\"} %d", metric_name, labels.Name, labels.Counter, value)
+	log.Print("-- Collecting metrics...")
+	var mType prometheus.ValueType
+	rsc.RS.RLock()
+	for metricName, labeledValues := range rsc.RS.Metrics {
+		for labels, value := range labeledValues {
+			//log.Printf("%s{\"%s\"=\"%s\"} %d", metricName, labels.Name, labels.Value, value)
+			switch metricName {
+			case "rsyslog_core_queue_size":
+				mType = prometheus.GaugeValue
+			default:
+				mType = prometheus.CounterValue
+			}
+			desc := prometheus.NewDesc(metricName, "", []string{labels.Name}, nil)
+			ch <- prometheus.MustNewConstMetric(desc, mType, float64(value), labels.Value)
 		}
 	}
+	rsc.RS.RUnlock()
 
 	// export internal counters
-	// iterate over rs.Current to generate metrics
+	ch <- prometheus.MustNewConstMetric(
+		prometheus.NewDesc(
+			"rsyslog_exporter_parser_failures",
+			"Amount of rsyslog stats parsing failures",
+			nil, nil,
+		),
+		prometheus.CounterValue,
+		float64(rsc.RS.ParserFailures),
+	)
+
+	ch <- prometheus.MustNewConstMetric(
+		prometheus.NewDesc(
+			"rsyslog_exporter_parsed_messages",
+			"Amount of rsyslog stat messages parsed",
+			nil, nil,
+		),
+		prometheus.CounterValue,
+		float64(rsc.RS.ParsedMessages),
+	)
+
+	ch <- prometheus.MustNewConstMetric(
+		prometheus.NewDesc(
+			"rsyslog_exporter_parse_timestamp",
+			"Latest parse Unix timestamp",
+			nil, nil,
+		),
+		prometheus.CounterValue,
+		float64(rsc.RS.ParseTimestamp),
+	)
 }
 
 func main() {
-	var metrics_addr = flag.String("listen-address", ":9292", "IP:port at which to serve metrics")
-	var metrics_path = flag.String("metrics-endpoint", "/metrics", "URL path at which to serve metrics")
-	var syslog_addr = flag.String("syslog-listen-address", "udp://0.0.0.0:5145", "Where to serve syslog input")
-	var syslog_format = flag.String("syslog-format", "rfc3164", "Which syslog version to use (rfc3164, rfc5424)")
+	var metricsAddr = flag.String("listen-address", ":9292", "IP:port at which to serve metrics")
+	var metricsPath = flag.String("metrics-endpoint", "/metrics", "URL path at which to serve metrics")
+	var syslogAddr = flag.String("syslog-listen-address", "udp://0.0.0.0:5145", "Where to serve syslog input")
+	var syslogFormat = flag.String("syslog-format", "rfc3164", "Which syslog version to use (rfc3164, rfc5424)")
 	flag.Parse()
 
-	_, channel, err := syslog_server_init(*syslog_format, *syslog_addr)
+	_, channel, err := syslogServerInit(*syslogFormat, *syslogAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -123,7 +176,7 @@ func main() {
 	)
 
 	// Expose the registered metrics via HTTP.
-	http.Handle(*metrics_path, promhttp.HandlerFor(
+	http.Handle(*metricsPath, promhttp.HandlerFor(
 		reg,
 		promhttp.HandlerOpts{
 			// Opt into OpenMetrics to support exemplars.
@@ -132,8 +185,8 @@ func main() {
 	))
 
 	// Read and print syslog messages
-	go process_syslog_messages(rs, channel)
+	go processSyslogMessages(rs, channel)
 
 	// start prometheus web-server
-	log.Fatal(http.ListenAndServe(*metrics_addr, nil))
+	log.Fatal(http.ListenAndServe(*metricsAddr, nil))
 }
