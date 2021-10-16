@@ -42,34 +42,40 @@ func sanitiseMetricName(name string) string {
 	nn = reUnderscores.ReplaceAllLiteralString(nn, "_")
 	// strip trailing underscore
 	nn = strings.TrimRight(nn, "_")
+
 	return nn
 }
 
 // Split dynstats counter stats by "." from right
 func splitRight(str string) (string, string) {
 	i := strings.LastIndexAny(str, ".")
+
 	return str[:i], str[i+1:]
 }
 
 func appendMetric(m RsyslogStatsMetrics, metricName string, labels RsyslogStatsLabels, value interface{}) RsyslogStatsMetrics {
 	saneMetricName := sanitiseMetricName(metricName)
 	saneValue := RsyslogStatsValue(value.(float64))
+
 	if _, found := m[saneMetricName]; !found {
 		m[saneMetricName] = make(RsyslogStatsLabeledValues)
 	}
+
 	m[saneMetricName][labels] = saneValue
+
 	return m
 }
 
 func getValue(value interface{}) (rv float64, e error) {
-	switch value.(type) {
+	switch v := value.(type) {
 	case float64:
-		rv = value.(float64)
+		rv = v
 	case string:
-		rv, e = strconv.ParseFloat(value.(string), 64)
+		rv, e = strconv.ParseFloat(v, 64)
 	default:
-		e = fmt.Errorf("cannot convert '%T' to float64", value)
+		e = fmt.Errorf("cannot convert '%T' to float64: %w", value, strconv.ErrSyntax)
 	}
+
 	return rv, e
 }
 
@@ -120,6 +126,7 @@ func NewRsyslogStats() *RsyslogStats {
 		rtNamed:         rs.parseNamedStats,
 		rtDefault:       rs.parseDefault,
 	}
+
 	return rs
 }
 
@@ -131,6 +138,7 @@ func (rs *RsyslogStats) add(m RsyslogStatsMetrics) {
 			if _, found := rs.Metrics[metric]; !found {
 				rs.Metrics[metric] = RsyslogStatsLabeledValues{}
 			}
+
 			rs.Metrics[metric][labels] = value
 		}
 		rs.Unlock()
@@ -141,6 +149,7 @@ func (rs *RsyslogStats) add(m RsyslogStatsMetrics) {
 func (rs *RsyslogStats) failToParse(err error, source string) error {
 	log.Printf("%s! JSON string is %s", err, source)
 	rs.ParserFailures++
+
 	return errors.Unwrap(err)
 }
 
@@ -160,74 +169,87 @@ type parserForType func(string, string, map[string]interface{}) (RsyslogStatsMet
 
 // Parse global dynstats counters
 func (rs *RsyslogStats) parseDynstatsGlobal(name, origin string, data map[string]interface{}) (RsyslogStatsMetrics, []error) {
-	var m = RsyslogStatsMetrics{}
+	m := RsyslogStatsMetrics{}
 	metricName := rs.MetricPrefix + "_" + origin + "_" + name
+
 	for field, value := range data["values"].(map[string]interface{}) {
 		cname, counter := splitRight(field)
 		appendMetric(m, metricName+"_"+counter, RsyslogStatsLabels{"counter", cname}, value)
 	}
+
 	return m, nil
 }
 
 // Parse dynstats.bucket counters
 func (rs *RsyslogStats) parseDynstatsBucket(name, origin string, data map[string]interface{}) (RsyslogStatsMetrics, []error) {
-	var m = RsyslogStatsMetrics{}
+	m := RsyslogStatsMetrics{}
 	metricName := rs.MetricPrefix + "_" + origin + "_" + name
+
 	for counter, value := range data["values"].(map[string]interface{}) {
 		appendMetric(m, metricName, RsyslogStatsLabels{"bucket", counter}, value)
 	}
+
 	return m, nil
 }
 
 // Parse sender stats
 func (rs *RsyslogStats) parseSenderStats(name, origin string, data map[string]interface{}) (RsyslogStatsMetrics, []error) {
-	var errs []error
+	errs := []error{}
 	v, e := getValue(data["messages"])
+
 	if e != nil {
 		return nil, append(errs, e)
 	}
+
 	m := RsyslogStatsMetrics{}
 	l := RsyslogStatsLabels{"sender", data["sender"].(string)}
 	metricName := rs.MetricPrefix + "_" + "sender_stat_messages"
 	appendMetric(m, metricName, l, v)
+
 	return m, nil
 }
 
 // Parse "named" counters (core.queue, core.action)
 func (rs *RsyslogStats) parseNamedStats(name, origin string, data map[string]interface{}) (RsyslogStatsMetrics, []error) {
-	var errs []error
-	var m = RsyslogStatsMetrics{}
-	var l = RsyslogStatsLabels{"name", name}
+	errs := []error{}
+	m := RsyslogStatsMetrics{}
+	l := RsyslogStatsLabels{"name", name}
 	metricName := rs.MetricPrefix + "_" + origin
+
 	for counter, value := range data {
 		if counter == rs.NameField || counter == rs.OriginField {
 			continue
 		}
+
 		if v, e := getValue(value); e != nil {
 			errs = append(errs, e)
 		} else {
 			appendMetric(m, metricName+"_"+counter, l, v)
 		}
 	}
+
 	return m, errs
 }
 
 // Parse common (unlabeled) counters
 func (rs *RsyslogStats) parseDefault(name, origin string, data map[string]interface{}) (RsyslogStatsMetrics, []error) {
-	var errs []error
+	errs := []error{}
 	m := RsyslogStatsMetrics{}
 	l := RsyslogStatsLabels{}
 	metricName := rs.MetricPrefix + "_" + origin + "_" + name
+
 	for counter, value := range data {
 		if counter == rs.NameField || counter == rs.OriginField {
 			continue
 		}
+
 		if v, e := getValue(value); e != nil {
 			errs = append(errs, e)
 		} else {
 			appendMetric(m, metricName+"_"+counter, l, v)
 		}
 	}
+
 	return m, errs
 }
 
@@ -265,20 +287,21 @@ func (rs *RsyslogStats) identify(data map[string]interface{}) (name string, orig
 			st = rtSender
 		}
 	}
+
 	return
 }
 
 // Parse JSON line and store metrics
 func (rs *RsyslogStats) Parse(statLine string) error {
-	log.Printf("-- %s\n", statLine)
-
-	var data map[string]interface{}
-	var name string
-	var origin string
+	var (
+		data   map[string]interface{}
+		name   string
+		origin string
+	)
 
 	err := json.Unmarshal([]byte(statLine), &data)
 	if err != nil {
-		return rs.failToParse(fmt.Errorf("Cannot parse JSON: %w", err), statLine)
+		return rs.failToParse(fmt.Errorf("cannot parse JSON: %w", err), statLine)
 	}
 
 	name, origin, rsType, err := rs.identify(data)
@@ -296,5 +319,6 @@ func (rs *RsyslogStats) Parse(statLine string) error {
 
 	rs.ParsedMessages++
 	rs.ParseTimestamp = time.Now().Unix()
+
 	return nil
 }

@@ -65,8 +65,9 @@ func syslogServerInit(syslogFormat string, conn string) (*syslog.Server, syslog.
 	case "tcp":
 		err = server.ListenTCP(url.Host)
 	default:
-		err = fmt.Errorf("Wrong syslog address: %s", conn)
+		err = fmt.Errorf("wrong syslog address: %s", conn)
 	}
+
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,6 +76,7 @@ func syslogServerInit(syslogFormat string, conn string) (*syslog.Server, syslog.
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return server, channel, nil
 }
 
@@ -84,75 +86,14 @@ func processSyslogMessages(rs *RsyslogStats, channel syslog.LogPartsChannel) {
 	}
 }
 
-// Collector
-type RsyslogStatsCollector struct {
-	RS *RsyslogStats
-}
-
-func NewRsyslogStatsCollector(rs *RsyslogStats) *RsyslogStatsCollector {
-	return &RsyslogStatsCollector{RS: rs}
-}
-
-func (rsc *RsyslogStatsCollector) Describe(ch chan<- *prometheus.Desc) {
-	log.Print("-- Describing metrics...")
-}
-
-func (rsc *RsyslogStatsCollector) Collect(ch chan<- prometheus.Metric) {
-	log.Print("-- Collecting metrics...")
-	var mType prometheus.ValueType
-	rsc.RS.RLock()
-	for metricName, labeledValues := range rsc.RS.Metrics {
-		for labels, value := range labeledValues {
-			//log.Printf("%s{\"%s\"=\"%s\"} %d", metricName, labels.Name, labels.Value, value)
-			switch metricName {
-			case "rsyslog_core_queue_size":
-				mType = prometheus.GaugeValue
-			default:
-				mType = prometheus.CounterValue
-			}
-			desc := prometheus.NewDesc(metricName, "", []string{labels.Name}, nil)
-			ch <- prometheus.MustNewConstMetric(desc, mType, float64(value), labels.Value)
-		}
-	}
-	rsc.RS.RUnlock()
-
-	// export internal counters
-	ch <- prometheus.MustNewConstMetric(
-		prometheus.NewDesc(
-			"rsyslog_exporter_parser_failures",
-			"Amount of rsyslog stats parsing failures",
-			nil, nil,
-		),
-		prometheus.CounterValue,
-		float64(rsc.RS.ParserFailures),
-	)
-
-	ch <- prometheus.MustNewConstMetric(
-		prometheus.NewDesc(
-			"rsyslog_exporter_parsed_messages",
-			"Amount of rsyslog stat messages parsed",
-			nil, nil,
-		),
-		prometheus.CounterValue,
-		float64(rsc.RS.ParsedMessages),
-	)
-
-	ch <- prometheus.MustNewConstMetric(
-		prometheus.NewDesc(
-			"rsyslog_exporter_parse_timestamp",
-			"Latest parse Unix timestamp",
-			nil, nil,
-		),
-		prometheus.CounterValue,
-		float64(rsc.RS.ParseTimestamp),
-	)
-}
-
 func main() {
-	var metricsAddr = flag.String("listen-address", ":9292", "IP:port at which to serve metrics")
-	var metricsPath = flag.String("metrics-endpoint", "/metrics", "URL path at which to serve metrics")
-	var syslogAddr = flag.String("syslog-listen-address", "udp://0.0.0.0:5145", "Where to serve syslog input")
-	var syslogFormat = flag.String("syslog-format", "rfc3164", "Which syslog version to use (rfc3164, rfc5424)")
+	var (
+		metricsAddr  = flag.String("listen-address", ":9292", "IP:port at which to serve metrics")
+		metricsPath  = flag.String("metrics-endpoint", "/metrics", "URL path at which to serve metrics")
+		syslogAddr   = flag.String("syslog-listen-address", "udp://0.0.0.0:5145", "Where to serve syslog input")
+		syslogFormat = flag.String("syslog-format", "rfc3164", "Which syslog version to use (rfc3164, rfc5424)")
+	)
+
 	flag.Parse()
 
 	_, channel, err := syslogServerInit(*syslogFormat, *syslogAddr)
