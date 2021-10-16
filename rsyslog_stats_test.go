@@ -411,9 +411,7 @@ func TestRsyslogStatsParse(t *testing.T) {
 
 	rs := NewRsyslogStats()
 	for _, c := range inputs {
-		if e := rs.Parse(c); e != nil {
-			t.Errorf("%w", e)
-		}
+		rs.Parse(c)
 	}
 
 	if diff := cmp.Diff(output.metrics, rs.Metrics); diff != "" {

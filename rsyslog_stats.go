@@ -21,7 +21,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -146,11 +145,9 @@ func (rs *RsyslogStats) add(m RsyslogStatsMetrics) {
 }
 
 // Parsing error wrapper
-func (rs *RsyslogStats) failToParse(err error, source string) error {
+func (rs *RsyslogStats) failToParse(err error, source string) {
 	log.Printf("%s! JSON string is %s", err, source)
 	rs.ParserFailures++
-
-	return errors.Unwrap(err)
 }
 
 // Parsers
@@ -292,7 +289,7 @@ func (rs *RsyslogStats) identify(data map[string]interface{}) (name string, orig
 }
 
 // Parse JSON line and store metrics
-func (rs *RsyslogStats) Parse(statLine string) error {
+func (rs *RsyslogStats) Parse(statLine string) {
 	var (
 		data   map[string]interface{}
 		name   string
@@ -301,12 +298,14 @@ func (rs *RsyslogStats) Parse(statLine string) error {
 
 	err := json.Unmarshal([]byte(statLine), &data)
 	if err != nil {
-		return rs.failToParse(fmt.Errorf("cannot parse JSON: %w", err), statLine)
+		rs.failToParse(fmt.Errorf("cannot parse JSON: %w", err), statLine)
+		return
 	}
 
 	name, origin, rsType, err := rs.identify(data)
 	if err != nil {
-		return rs.failToParse(err, statLine)
+		rs.failToParse(err, statLine)
+		return
 	}
 
 	m, errs := rs.parsersByType[rsType](name, origin, data)
@@ -319,6 +318,4 @@ func (rs *RsyslogStats) Parse(statLine string) error {
 
 	rs.ParsedMessages++
 	rs.ParseTimestamp = time.Now().Unix()
-
-	return nil
 }
