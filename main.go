@@ -25,6 +25,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"time"
 
 	_ "net/http/pprof"
 
@@ -32,6 +34,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gopkg.in/mcuadros/go-syslog.v2"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
+)
+
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = time.Now().Format(time.RFC3339)
+	builtBy = "unknown"
 )
 
 // Init syslog server
@@ -86,15 +95,34 @@ func processSyslogMessages(rs *RsyslogStats, channel syslog.LogPartsChannel) {
 	}
 }
 
+func printVersionAndExit() {
+	const versionInfo = `
+Version: %s
+Commit:  %s
+Date:    %s
+BuiltBy: %s
+`
+	fmt.Fprintf(os.Stderr, versionInfo, version, commit, date, builtBy)
+	os.Exit(0)
+}
+
 func main() {
 	var (
-		metricsAddr  = flag.String("listen-address", ":9292", "IP:port at which to serve metrics")
-		metricsPath  = flag.String("metrics-endpoint", "/metrics", "URL path at which to serve metrics")
-		syslogAddr   = flag.String("syslog-listen-address", "udp://0.0.0.0:5145", "Where to serve syslog input")
-		syslogFormat = flag.String("syslog-format", "rfc3164", "Which syslog version to use (rfc3164, rfc5424)")
+		metricsAddr  = flag.String("listen-address", ":9292", "ip:port to serve metrics on")
+		metricsPath  = flag.String("metrics-endpoint", "/metrics", "URL path to serve metrics on")
+		syslogAddr   = flag.String("syslog-listen-address", "udp://0.0.0.0:5145", "proto://ip:port to listen on for the syslog input")
+		syslogFormat = flag.String("syslog-format", "rfc3164", "Syslog version to use (rfc3164, rfc5424)")
+		versionFlag  = false
 	)
 
+	flag.BoolVar(&versionFlag, "v", false, "Print the version and exit")
+	flag.BoolVar(&versionFlag, "version", false, "Print the version and exit")
+
 	flag.Parse()
+
+	if versionFlag {
+		printVersionAndExit()
+	}
 
 	_, channel, err := syslogServerInit(*syslogFormat, *syslogAddr)
 	if err != nil {

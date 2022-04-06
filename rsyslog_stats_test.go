@@ -189,7 +189,7 @@ func TestRsyslogStatsParseDynstatsGlobal(t *testing.T) {
 	for _, c := range tests {
 		got, errs := rs.parseDynstatsGlobal(c.input["name"].(string), c.input["origin"].(string), c.input)
 		for _, e := range errs {
-			t.Errorf("%w", e)
+			t.Errorf("%v", e)
 		}
 
 		if diff := cmp.Diff(c.output, got); diff != "" {
@@ -216,7 +216,7 @@ func TestRsyslogStatsParseDynstatsBucket(t *testing.T) {
 	for _, c := range tests {
 		got, errs := rs.parseDynstatsBucket(c.input["name"].(string), c.input["origin"].(string), c.input)
 		for _, e := range errs {
-			t.Errorf("%w", e)
+			t.Errorf("%v", e)
 		}
 
 		if diff := cmp.Diff(c.output, got); diff != "" {
@@ -247,7 +247,7 @@ func TestRsyslogStatsParseSenderStats(t *testing.T) {
 	for _, c := range tests {
 		got, errs := rs.parseSenderStats(c.input["name"].(string), c.input["origin"].(string), c.input)
 		for _, e := range errs {
-			t.Errorf("%w", e)
+			t.Errorf("%v", e)
 		}
 
 		if diff := cmp.Diff(c.output, got); diff != "" {
@@ -279,7 +279,7 @@ func TestRsyslogStatsParseNamedStats(t *testing.T) {
 	for _, c := range tests {
 		got, errs := rs.parseNamedStats(c.input["name"].(string), c.input["origin"].(string), c.input)
 		for _, e := range errs {
-			t.Errorf("%w", e)
+			t.Errorf("%v", e)
 		}
 
 		if diff := cmp.Diff(c.output, got); diff != "" {
@@ -309,7 +309,7 @@ func TestRsyslogStatsParseDefault(t *testing.T) {
 	for _, c := range tests {
 		got, errs := rs.parseDefault(c.input["name"].(string), c.input["origin"].(string), c.input)
 		for _, e := range errs {
-			t.Errorf("%w", e)
+			t.Errorf("%v", e)
 		}
 
 		if diff := cmp.Diff(c.output, got); diff != "" {

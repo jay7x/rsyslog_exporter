@@ -78,9 +78,10 @@ func getValue(value interface{}) (rv float64, e error) {
 	return rv, e
 }
 
-// Metric value type
+// RsyslogStatsValue is the metric value type
 type RsyslogStatsValue int
 
+// RsyslogStatsLabels holds the metric value labels
 // Label: {name="main Q"} -> { Name: "name", Value: "main Q" }
 // Just one label per value is used at the moment
 type RsyslogStatsLabels struct {
@@ -88,13 +89,15 @@ type RsyslogStatsLabels struct {
 	Value string
 }
 
+// RsyslogStatsLabeledValues is the map of labeled metric values
 // Map of metric values with their labels: { {name="main Q"}: 123, ...}
 type RsyslogStatsLabeledValues map[RsyslogStatsLabels]RsyslogStatsValue
 
+// RsyslogStatsMetrics holds the metrics with their labeled values
 // Map of metrics: '{ "rsyslog_core_queue_discarded_full": { {"name":"main Q"}: 123 }, ... }, ...'
 type RsyslogStatsMetrics map[string]RsyslogStatsLabeledValues
 
-// Main structure
+// RsyslogStats is the main structure to store the rsyslog metrics
 type RsyslogStats struct {
 	sync.RWMutex
 	Metrics        RsyslogStatsMetrics
@@ -108,7 +111,7 @@ type RsyslogStats struct {
 	parsersByType map[rsyslogStatType]parserForType
 }
 
-// RsyslogStats constructor
+// NewRsyslogStats is the RsyslogStats constructor
 func NewRsyslogStats() *RsyslogStats {
 	rs := new(RsyslogStats)
 	rs.MetricPrefix = "rsyslog"

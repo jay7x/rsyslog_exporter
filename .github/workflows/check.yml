@@ -1,4 +1,4 @@
-name: test and lint
+name: check
 
 on:
   pull_request: []
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: ['1.17']
+        go: ['1.18']
     name: go v${{ matrix.go }} test
     steps:
       - uses: actions/checkout@v2
@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        golangci: ['1.42.1']
-        go: ['1.17']
+        golangci: ['1.45.2']
+        go: ['1.18']
     name: golangci-lint v${{ matrix.golangci }}, go v${{ matrix.go }}
     steps:
       - uses: actions/checkout@v2

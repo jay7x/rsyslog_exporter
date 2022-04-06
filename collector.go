@@ -25,7 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Collector
+// RsyslogStatsCollector is the prometheus collector implementation
 type RsyslogStatsCollector struct {
 	RS *RsyslogStats
 }
