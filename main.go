@@ -115,7 +115,7 @@ func main() {
 		versionFlag  = false
 	)
 
-	flag.BoolVar(&versionFlag, "v", false, "Print the version and exit")
+	flag.BoolVar(&versionFlag, "V", false, "Print the version and exit")
 	flag.BoolVar(&versionFlag, "version", false, "Print the version and exit")
 
 	flag.Parse()
